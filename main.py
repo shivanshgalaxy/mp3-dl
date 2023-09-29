@@ -2,7 +2,6 @@ from sys import exit, stderr
 from pytube import YouTube
 from pytube.exceptions import *
 
-# TODO - Add functionality to download a song
 url = input("Enter a URL (YouTube only): ")
 
 try:
