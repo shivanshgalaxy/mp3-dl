@@ -5,7 +5,8 @@ from pytube.exceptions import *
 from dotenv import load_dotenv
 import os
 import base64
-from requests import post
+from requests import post, get
+import re
 
 load_dotenv()
 client_id = os.getenv("CLIENT_ID")
@@ -13,8 +14,22 @@ client_secret = os.getenv("CLIENT_SECRET")
 
 
 def main():
-    get_token()
-    url = input("Enter a URL (YouTube only): ")
+    token = get_token()
+    url = input("Enter a URL: ")
+    # TODO: add regex match for YouTube/Spotify
+    youtube_pattern = re.compile(r'.*(youtube\.com|youtu\.be).*')
+    spotify_pattern = re.compile(r'(https://)?open\.spotify\.com/(track|playlist)/(\w+)(\?si=\w+)?')
+
+    if re.findall(youtube_pattern, url):
+        get_video(url)
+        return
+
+    song_id = spotify_pattern.sub(r'\3', url)
+    if song_id:
+        get_metadata(token, song_id)
+
+
+def get_video(url):
     try:
         video = YouTube(url.strip())
     except RegexMatchError:
@@ -23,9 +38,11 @@ def main():
     except VideoUnavailable:
         stderr.write("Video not available\n")
         exit(1)
-
     stream = video.streams.get_audio_only()
-    print(stream.title)
+    download_video(stream)
+
+
+def download_video(stream):
     title = stream.title.replace(" ", "_") + ".m4a"
     stream.download("/home/sh/Downloads", title)
 
@@ -43,12 +60,19 @@ def get_token():
     result = post(url, headers=headers, data=data)
     json_result = json.loads(result.content)
     token = json_result["access_token"]
-    print(token)
     return token
 
 
 def get_auth_header(token):
     return {"Authorization": "Bearer " + token}
+
+
+def get_metadata(token, song_id):
+    url = "https://api.spotify.com/v1/tracks/" + song_id
+    headers = get_auth_header(token)
+    result = get(url, headers=headers)
+    json_result = json.loads(result.content)["album"]
+    return json_result
 
 
 # TODO - Add metadata to downloaded song
