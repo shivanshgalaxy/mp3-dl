@@ -1,6 +1,6 @@
 import json
 from sys import exit, stderr
-from pytube import YouTube, Search
+from pytube import YouTube
 from pytube.exceptions import *
 from dotenv import load_dotenv
 import os
@@ -18,6 +18,7 @@ client_secret = os.getenv("CLIENT_SECRET")
 def main():
     token = get_token()
     url = input("Enter a URL: ")
+    # TODO: add a playlist handler
     youtube_pattern = re.compile(r'.*(youtube\.com|youtu\.be).*')
     spotify_pattern = re.compile(r'(https://)?open\.spotify\.com/(track|playlist)/(\w+)(\?si=\w+)?')
 
@@ -37,11 +38,15 @@ def main():
         search = ytmusic.search(search_query, limit=1, filter="songs")
         video_id = search[0]["videoId"]
         query_url = f"https://www.youtube.com/watch?v={video_id}"
-        print(query_url)
         download_video(query_url, song_id)
 
 
 def download_video(url, song_id):
+    print("Convert to MP3? [y/N]", end=" ")
+    convert = input().lower()
+    convert_to_mp3 = False
+    if convert in ["y", "yes"]:
+        convert_to_mp3 = True
     token = get_token()
     try:
         video = YouTube(url.strip())
@@ -52,14 +57,21 @@ def download_video(url, song_id):
         stderr.write("Video not available\n")
         exit(1)
     stream = video.streams.get_audio_only()
+    print(stream)
 
     # TODO: Add a downloading status bar
     print(f"Downloading from {url}")
-    title = stream.title.replace(" ", "_") + ".m4a"
-    filepath = stream.download("/home/sh/Downloads", title)
-    print("Download complete!")
+    title = stream.title.replace(" ", "_")
+    output_path = f"/home/sh/Music/"
+    filepath = stream.download(output_path, title + ".m4a")
     data = get_metadata(token, song_id)
     add_metadata(filepath, data)
+    print("Download complete!")
+    if convert_to_mp3:
+        mp3_path = f"{output_path}/mp3/{title}.mp3"
+        print("Converting")
+        os.system(f"ffmpeg -i {filepath} -c:v copy -c:a libmp3lame -q:a 4 -hide_banner -loglevel error {mp3_path}")
+        print("Conversion complete!")
 
 
 def get_token():
@@ -88,6 +100,7 @@ def get_metadata(token, song_id):
     result = get(url, headers=headers)
     json_result = json.loads(result.content)["album"], json.loads(result.content)["name"], json.loads(result.content)[
         "artists"]
+
     return json_result
 
 
@@ -108,6 +121,7 @@ def get_song_id(token, url):
 
 def add_metadata(filepath, data):
     mp4 = MP4(filepath)
+    mp4.delete()
 
     # Retrieving metadata from Spotify's API
     name = data[1]
@@ -122,16 +136,13 @@ def add_metadata(filepath, data):
     with open(cover_path, "wb") as file:
         file.write(image)
 
-    # Creating an album cover object
-    album_cover = MP4Cover(open(cover_path, "rb").read(), imageformat=MP4Cover.FORMAT_JPEG)
-
     # Writing metadata into the file
     mp4["\xa9nam"] = name
     mp4["\xa9alb"] = album
     mp4["\xa9ART"] = artist
     with open(cover_path, "rb") as coverart:
         mp4["covr"] = [MP4Cover(coverart.read(), imageformat=MP4Cover.FORMAT_JPEG)]
-
+    # TODO: Fix issue that occurs with album art when converting to mp3AZsaAA
     mp4.save(filepath)
     mp4.pprint()
 
