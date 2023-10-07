@@ -8,6 +8,8 @@ import base64
 from requests import post, get
 import re
 from mutagen.mp4 import MP4, MP4Cover
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3
 from ytmusicapi import YTMusic
 
 load_dotenv()
@@ -18,8 +20,9 @@ client_secret = os.getenv("CLIENT_SECRET")
 def main():
     token = get_token()
     url = input("Enter a URL: ")
-    # TODO: add a playlist handler
+    # TODO: Add a playlist handler
     youtube_pattern = re.compile(r'.*(youtube\.com|youtu\.be).*')
+    # TODO: Fix issue with copying spotify links from the mobile app
     spotify_pattern = re.compile(r'(https://)?open\.spotify\.com/(track|playlist)/(\w+)(\?si=\w+)?')
 
     if re.findall(youtube_pattern, url):
@@ -57,7 +60,6 @@ def download_video(url, song_id):
         stderr.write("Video not available\n")
         exit(1)
     stream = video.streams.get_audio_only()
-    print(stream)
 
     # TODO: Add a downloading status bar
     print(f"Downloading from {url}")
@@ -70,7 +72,16 @@ def download_video(url, song_id):
     if convert_to_mp3:
         mp3_path = f"{output_path}/mp3/{title}.mp3"
         print("Converting")
+        # ffmpeg command that converts a file's audio stream to mp3
+        # while retaining its video stream using a variable bitrate
         os.system(f"ffmpeg -i {filepath} -c:v copy -c:a libmp3lame -q:a 4 -hide_banner -loglevel error {mp3_path}")
+        mp3 = MP3(mp3_path)
+        # Obtains the APIC frame which has no description by default after conversion
+        # to change it from Other to Front Cover
+        picture_tag = mp3.tags["APIC:"]
+        picture_tag.type = 3  # Refers to mutagen.id3.PictureType.COVER_FRONT
+        mp3.tags["APIC:"] = picture_tag
+        mp3.save()
         print("Conversion complete!")
 
 
@@ -142,7 +153,6 @@ def add_metadata(filepath, data):
     mp4["\xa9ART"] = artist
     with open(cover_path, "rb") as coverart:
         mp4["covr"] = [MP4Cover(coverart.read(), imageformat=MP4Cover.FORMAT_JPEG)]
-    # TODO: Fix issue that occurs with album art when converting to mp3AZsaAA
     mp4.save(filepath)
     mp4.pprint()
 
