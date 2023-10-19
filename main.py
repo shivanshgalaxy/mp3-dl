@@ -1,6 +1,6 @@
 import json
 from sys import exit, stderr
-from pytube import YouTube
+from pytube import YouTube, Playlist
 from pytube.exceptions import *
 from dotenv import load_dotenv
 import os
@@ -20,12 +20,16 @@ def main():
     token = get_token()
     url = input("Enter a URL: ")
     # TODO: Add a playlist handler
-    youtube_pattern = re.compile(r'.*(youtube\.com|youtu\.be).*')
+    youtube_pattern = re.compile(r'.*(youtube\.com|youtu\.be)/(\w+)?.*')
     spotify_pattern = re.compile(r'(https://)?(open\.)?spotify\.(com|link)/(track/|playlist/)+(\w+)(\?si=\w+)?')
+
+    if youtube_pattern.sub(r'\2', url) == "playlist":
+        download_youtube_playlist(token, url)
+        return
 
     if re.findall(youtube_pattern, url):
         song_id = get_song_id(token, url)
-        download_video(url, song_id)
+        download_video(token, url, song_id)
         return
 
     if spotify_pattern.sub(r'\4', url) == "track/":
@@ -34,16 +38,15 @@ def main():
 
     if spotify_pattern.sub(r'\4', url) == "playlist/":
         playlist_id = spotify_pattern.sub(r'\5', url)
-        download_playlist(token, playlist_id)
+        download_spotify_playlist(token, playlist_id)
 
 
-def download_video(url, song_id):
+def download_video(token, url, song_id):
     print("Convert to MP3? [y/N]", end=" ")
-    convert = input().lower()
+    convert = os.getenv("CONVERT")
     convert_to_mp3 = False
     if convert in ["y", "yes"]:
         convert_to_mp3 = True
-    token = get_token()
     try:
         video = YouTube(url.strip())
     except RegexMatchError:
@@ -56,7 +59,7 @@ def download_video(url, song_id):
 
     # TODO: Add a downloading status bar
     print(f"Downloading from {url}")
-    title = stream.title.replace(" ", "_")
+    title = stream.title.replace(" ", "_").replace("(", "_").replace(")", "_")
     output_path = f"/home/sh/Music/"
     filepath = stream.download(output_path, title + ".m4a")
     data = get_metadata(token, song_id)
@@ -66,7 +69,7 @@ def download_video(url, song_id):
     os.remove(filepath)
     print("Download complete!")
     if convert_to_mp3:
-        mp3_path = f"{output_path}/mp3/{title}.mp3"
+        mp3_path = f"{output_path}mp3/{title}.mp3"
         print("Converting")
         # ffmpeg command that converts a file's audio stream to mp3
         # while retaining its video stream using a variable bitrate
@@ -91,10 +94,10 @@ def download_song(token, song_id):
     search = ytmusic.search(search_query, limit=1, filter="songs")
     video_id = search[0]["videoId"]
     query_url = f"https://www.youtube.com/watch?v={video_id}"
-    download_video(query_url, song_id)
+    download_video(token, query_url, song_id)
 
 
-def download_playlist(token, playlist_id):
+def download_spotify_playlist(token, playlist_id):
     data = get_playlist(token, playlist_id)
     with open("dump.txt", "w") as file:
         json.dump(data, file)
@@ -103,6 +106,13 @@ def download_playlist(token, playlist_id):
     for song in songs:
         song_id = song["track"]["id"]
         download_song(token, song_id)
+
+
+def download_youtube_playlist(token, playlist_url):
+    playlist = Playlist(playlist_url)
+    for url in playlist.video_urls:
+        song_id = get_song_id(token, url)
+        download_video(token, url, song_id)
 
 
 def get_token():
