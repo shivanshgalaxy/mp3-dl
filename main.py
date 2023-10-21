@@ -42,7 +42,6 @@ def main():
 
 
 def download_video(token, url, song_id):
-    print("Convert to MP3? [y/N]", end=" ")
     convert = os.getenv("CONVERT")
     convert_to_mp3 = False
     if convert in ["y", "yes"]:
@@ -62,8 +61,12 @@ def download_video(token, url, song_id):
     title = stream.title.replace(" ", "_").replace("(", "_").replace(")", "_")
     output_path = f"/home/sh/Music/"
     filepath = stream.download(output_path, title + ".m4a")
-    data = get_metadata(token, song_id)
-    add_metadata(filepath, data)
+    if song_id:
+        data = get_metadata(token, song_id)
+        add_metadata(filepath, data)
+    else:
+        add_youtube_metadata(filepath, video)
+
     m4a_path = f"{output_path}m4a/{title}.m4a"
     os.system(f"ffmpeg -i {filepath} -c:v copy -c:a aac -hide_banner -loglevel error {m4a_path}")
     os.remove(filepath)
@@ -99,9 +102,6 @@ def download_song(token, song_id):
 
 def download_spotify_playlist(token, playlist_id):
     data = get_playlist(token, playlist_id)
-    with open("dump.txt", "w") as file:
-        json.dump(data, file)
-
     songs = data["tracks"]["items"]
     for song in songs:
         song_id = song["track"]["id"]
@@ -139,11 +139,17 @@ def get_metadata(token, song_id):
     url = "https://api.spotify.com/v1/tracks/" + song_id
     headers = get_auth_header(token)
     result = get(url, headers=headers)
-    json_result = json.loads(result.content)["album"], json.loads(result.content)["name"], json.loads(result.content)[
-        "artists"]
-    json_result = list(json_result)
+    json_result = json.loads(result.content)
 
-    return json_result
+    with open("dump2.txt", "w") as file:
+        json.dump(json_result, file)
+
+    if json_result.get("error") is None:
+        metadata = json_result["album"], json_result["name"], json_result(result.content)["artists"]
+        metadata = list(metadata)
+        return metadata
+    else:
+        return {}
 
 
 def get_playlist(token, playlist_id):
@@ -164,45 +170,75 @@ def get_song_id(token, url):
     headers = get_auth_header(token)
     result = get(query_url, headers=headers)
     # Gets the song ID from the JSON object
-    json_result = json.loads(result.content)["tracks"]["items"][0]
-    song_id = json_result["id"]
+    try:
+        json_result = json.loads(result.content)["tracks"]["items"][0]
+        song_id = json_result["id"]
+    except IndexError:
+        stderr.write("Song ID not found\n")
+        return ""
     return song_id
 
 
 def add_metadata(filepath, data):
     mp4 = MP4(filepath)
     mp4.delete()
-    with open("dump.txt", "w") as file:
-        json.dump(data, file)
+
     # Retrieving metadata from Spotify's API
-    name = data[1]
+    try:
+        name = data[1]
+    except KeyError:
+        name = "Unknown track"
+        stderr.write("Track name not found\n")
+
     try:
         album = data[0]["name"]
     except KeyError:
         album = ""
-        print("Song album not found")
+        stderr.write("Song album not found\n")
 
     artists = []
-    for artist in data[2]:
-        artists.append(artist["name"])
+    try:
+        for artist in data[2]:
+            artists.append(artist["name"])
+    except KeyError:
+        artists.append("Unknown artist")
+        stderr.write("Artist not found\n")
 
-    cover_url = data[0]["images"][0]["url"]
+    try:
+        cover_url = data[0]["images"][0]["url"]
+        # Downloading cover art
+        response = get(cover_url)
+        image = response.content
+        cover_path = f"/home/sh/Music/CoverArt/{album}{artists[0]}.jpeg".replace(" ", "_")
+        with open(cover_path, "wb") as file:
+            file.write(image)
+        with open(cover_path, "rb") as coverart:
+            mp4["covr"] = [MP4Cover(coverart.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+    except KeyError or IOError:
+        stderr.write("Album art not found\n")
 
-    # Downloading cover art
-    response = get(cover_url)
-    image = response.content
-    cover_path = f"/home/sh/Music/CoverArt/{album}{artists[0]}.jpeg".replace(" ", "_")
-    with open(cover_path, "wb") as file:
-        file.write(image)
-
-    # Writing metadata into the file
     mp4["\xa9nam"] = name
     mp4["\xa9alb"] = album
     mp4["\xa9ART"] = artists
-    with open(cover_path, "rb") as coverart:
-        mp4["covr"] = [MP4Cover(coverart.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+
     mp4.save(filepath)
     mp4.pprint()
+
+
+def add_youtube_metadata(filepath, video):
+    mp4 = MP4(filepath)
+    track_name = video.title
+    cover_url = video.thumbnail_url
+    print(cover_url)
+    response = get(cover_url)
+    image = response.content
+    cover_path = f"/home/sh/Music/CoverArt/{track_name}.jpeg".replace(" ", "_")
+    with open(cover_path, "wb") as file:
+        file.write(image)
+    with open(cover_path, "rb") as cover_art:
+        mp4["covr"] = [MP4Cover(cover_art.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+    mp4["\xa9nam"] = track_name
+    mp4.save(filepath)
 
 
 if __name__ == '__main__':
